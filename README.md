@@ -1,0 +1,2 @@
+# launchtower-meteor-miner
+LaunchTower
