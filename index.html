@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Meteor Miner — LaunchTower</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3444;
+    --text:#e6edf3; --dim:#8b98a9; --accent:#ffb454; --green:#3fb950;
+    --red:#f85149; --blue:#58a6ff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;background:var(--bg);color:var(--text);
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;overflow:hidden;
+    touch-action:none;user-select:none;-webkit-user-select:none}
+  #wrap{position:fixed;inset:0;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;justify-content:space-between;
+    padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line);
+    flex-wrap:wrap;gap:6px;z-index:5}
+  .brand{font-weight:700;font-size:15px;letter-spacing:.5px}
+  .brand span{color:var(--accent)}
+  .stats{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:6px;
+    padding:4px 9px;display:flex;align-items:center;gap:5px;white-space:nowrap}
+  .stat b{color:var(--accent);font-variant-numeric:tabular-nums}
+  .stat.fuel b{color:var(--green)}
+  .stat.fuel.low b{color:var(--red)}
+  #stage{flex:1;position:relative;overflow:hidden}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(8,11,16,.82);z-index:10;backdrop-filter:blur(3px)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:26px 30px;max-width:420px;width:88%;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+  .card h1{font-size:24px;margin-bottom:8px}
+  .card h1 em{color:var(--accent);font-style:normal}
+  .card p{color:var(--dim);font-size:13.5px;line-height:1.55;margin-bottom:16px}
+  .card .big{font-size:15px;color:var(--text);margin-bottom:14px;font-variant-numeric:tabular-nums}
+  .btn{display:inline-block;background:var(--accent);color:#1a1206;font-weight:700;
+    border:none;border-radius:8px;padding:11px 26px;font-size:15px;cursor:pointer;
+    margin:4px;transition:transform .08s}
+  .btn:active{transform:scale(.96)}
+  .btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+  .upgrades{text-align:left;margin:14px 0 18px;display:flex;flex-direction:column;gap:8px}
+  .upg{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 12px}
+  .upg .info{font-size:13px}
+  .upg .info small{display:block;color:var(--dim);font-size:11.5px;margin-top:2px}
+  .upg .lv{color:var(--blue);font-weight:700}
+  .upg button{background:var(--blue);color:#04121f;border:none;border-radius:6px;
+    padding:7px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .upg button:disabled{background:var(--line);color:var(--dim);cursor:not-allowed}
+  .upg button:active:not(:disabled){transform:scale(.95)}
+  footer{padding:7px 12px;background:var(--panel);border-top:1px solid var(--line);
+    text-align:center;font-size:11.5px;color:var(--dim);z-index:5}
+  footer a{color:var(--blue);text-decoration:none}
+  .hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+    background:rgba(13,17,23,.85);border:1px solid var(--line);border-radius:20px;
+    padding:6px 16px;font-size:12px;color:var(--dim);z-index:4;pointer-events:none;
+    transition:opacity .6s}
+  .toast{position:absolute;top:14px;left:50%;transform:translateX(-50%);
+    background:var(--panel);border:1px solid var(--accent);border-radius:8px;
+    padding:8px 18px;font-size:13.5px;font-weight:600;z-index:6;pointer-events:none;
+    animation:toastIn .25s ease-out}
+  @keyframes toastIn{from{opacity:0;transform:translate(-50%,-10px)}to{opacity:1;transform:translate(-50%,0)}}
+  @media (max-height:520px){ .card{padding:16px 20px} .card h1{font-size:20px} .card p{margin-bottom:10px} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <div class="brand">⛏ <span>Meteor</span> Miner</div>
+    <div class="stats">
+      <div class="stat">💰 <b id="uiCoins">0</b></div>
+      <div class="stat fuel" id="fuelWrap">⛽ <b id="uiFuel">100</b></div>
+      <div class="stat">📏 <b id="uiDepth">0</b>m</div>
+      <div class="stat">🏆 <b id="uiRecord">0</b>m</div>
+      <div class="stat">🪨 <b id="uiOre">0</b></div>
+    </div>
+  </header>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div class="hint" id="hint">Hold to drill down · release to float · ↑↓ or W/S to steer · T / Space to surface</div>
+    <div id="overlay"></div>
+  </div>
+  <footer>LaunchTower · free browser tools for pixel artists &amp; game devs · <a href="https://pennypenguinapp-beep.github.io/" target="_blank" rel="noopener">more games &amp; tools →</a></footer>
+</div>
+<script>
+(function(){
+"use strict";
+/* ============ constants ============ */
+const TILE=20, MAXFUEL=100, DRAIN=1.1, REGEN=3.2, GRAV=0.05,
+      STEER=0.16, MAXVX=2.6, MAXVY=3.4, FUEL_COST=0.55,
+      ORE_VALUE={iron:2,copper:4,gold:9,meteor:22};
+const ORE_COLOR={iron:"#9aa7b5",copper:"#e08a4c",gold:"#ffd54a",meteor:"#7ee787"};
+const ORE_NAME={iron:"Iron",copper:"Copper",gold:"Gold",meteor:"Meteorium"};
+const LAYER=[
+  {name:"Topsoil",   color:"#4a3826", deep:"#3a2c1e"},
+  {name:"Clay",      color:"#5d4a33", deep:"#4a3a28"},
+  {name:"Rock",      color:"#3d4451", deep:"#313743"},
+  {name:"Deep Rock", color:"#2c313c", deep:"#22262f"},
+  {name:"Magma Vein",color:"#3a2a2a", deep:"#2c1f1f"}
+];
+const LAYER_AT=d=> d<3?0 : d<8?1 : d<15?2 : d<26?3 : 4;
+
+/* ============ state ============ */
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+let W=0,H=0,DPR=1;
+const S={
+  mode:"menu",            // menu | play | surface | gameover
+  x:0, y:0,               // sub-tile position (pixels in world)
+  vx:0, vy:0,
+  fuel:MAXFUEL, coins:0, ore:{iron:0,copper:0,gold:0,meteor:0},
+  drillLv:1, tankLv:1,
+  record:0,
+  grid:null, cols:0, rows:0,
+  particles:[], shake:0, time:0,
+  drilling:false, surfacing:false,
+  toastTimer:0
+};
+try{
+  S.coins=+localStorage.getItem("mm_coins")||0;
+  S.drillLv=+localStorage.getItem("mm_drill")||1;
+  S.tankLv=+localStorage.getItem("mm_tank")||1;
+  S.record=+localStorage.getItem("mm_record")||0;
+}catch(e){}
+const save=()=>{try{
+  localStorage.setItem("mm_coins",S.coins);
+  localStorage.setItem("mm_drill",S.drillLv);
+  localStorage.setItem("mm_tank",S.tankLv);
+  localStorage.setItem("mm_record",S.record);
+}catch(e){}};
+
+/* ============ world gen ============ */
+function oreChance(d){
+  const base=0.055;
+  const iron=base*1.6, copper=base*1.1, gold=base*0.55, meteor=base*0.18;
+  const depthBoost=1+(d/40)*0.35;
+  return {iron:iron*depthBoost, copper:copper*depthBoost,
+          gold:gold*(1+d/25), meteor:meteor*(1+d/18)};
+}
+function genWorld(){
+  const cols=Math.ceil(W/TILE)+2;
+  const rows=Math.ceil(H/TILE)+2;
+  const g=new Array(cols*rows);
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const d=r; const ch=oreChance(d);
+      let ore=null;
+      const roll=Math.random();
+      let acc=0;
+      for(const k of ["iron","copper","gold","meteor"]){
+        acc+=ch[k];
+        if(roll<acc){ore=k;break;}
+      }
+      g[r*cols+c]={ore:ore, broken:false,
+        shade:Math.random()<0.5?0:1,
+        speck:Math.random()};
+    }
+  }
+  S.grid=g; S.cols=cols; S.rows=rows;
+}
+
+/* ============ sizing ============ */
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,2);
+  const stage=document.getElementById("stage");
+  W=stage.clientWidth; H=stage.clientHeight;
+  cv.width=W*DPR; cv.height=H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  if(S.grid){
+    const oldX=S.x, oldY=S.y;
+    genWorld();
+    S.x=oldX; S.y=oldY;
+  }
+}
+window.addEventListener("resize",resize);
+
+/* ============ helpers ============ */
+const $=id=>document.getElementById(id);
+function toast(msg){
+  const t=document.createElement("div");
+  t.className="toast"; t.textContent=msg;
+  $("stage").appendChild(t);
+  setTimeout(()=>{t.style.opacity="0";t.style.transition="opacity .4s";
+    setTimeout(()=>t.remove(),420);},1600);
+}
+function depthMeters(){ return Math.max(0,Math.floor(S.y/TILE)); }
+function totalOre(){ return S.ore.iron+S.ore.copper+S.ore.gold+S.ore.meteor; }
+function oreValue(){ return S.ore.iron*2+S.ore.copper*4+S.ore.gold*9+S.ore.meteor*22; }
+function drillPower(){ return 1+(S.drillLv-1)*0.5; }
+function tankMax(){ return MAXFUEL+(S.tankLv-1)*25; }
+function drillCost(){ return 30+S.drillLv*25; }
+function tankCost(){ return 25+S.tankLv*20; }
+function updateHUD(){
+  $("uiCoins").textContent=S.coins;
+  $("uiFuel").textContent=Math.ceil(S.fuel);
+  $("fuelWrap").classList.toggle("low",S.fuel<tankMax()*0.25);
+  $("uiDepth").textContent=depthMeters();
+  $("uiRecord").textContent=S.record;
+  $("uiOre").textContent=totalOre();
+}
+
+/* ============ particles ============ */
+function spawnDust(x,y,color,n){
+  for(let i=0;i<n;i++){
+    S.particles.push({x:x+(Math.random()-.5)*10,y:y+(Math.random()-.5)*10,
+      vx:(Math.random()-.5)*2.4, vy:-Math.random()*1.6-0.4,
+      life:1, decay:0.02+Math.random()*0.02, color:color,
+      size:1.5+Math.random()*2.5});
+  }
+}
+function spawnSpark(x,y,color){
+  for(let i=0;i<3;i++){
+    S.particles.push({x:x,y:y,vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,
+      life:1,decay:0.05,color:color,size:1.5});
+  }
+}
+function updateParticles(){
+  for(let i=S.particles.length-1;i>=0;i--){
+    const p=S.particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.vy+=0.04; p.life-=p.decay;
+    if(p.life<=0) S.particles.splice(i,1);
+  }
+}
+
+/* ============ input ============ */
+const keys={};
+window.addEventListener("keydown",e=>{
+  keys[e.key.toLowerCase()]=true;
+  if(e.key===" "||e.key==="t"||e.key==="T"){
+    e.preventDefault();
+    if(S.mode==="play") startSurface();
+    else if(S.mode==="menu") startGame();
+    else if(S.mode==="gameover") startGame();
+  }
+  if(e.key==="Enter"&&S.mode==="surface") collectOre();
+});
+window.addEventListener("keyup",e=>{keys[e.key.toLowerCase()]=false;});
+cv.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  if(S.mode==="play"){S.drilling=true;S.surfacing=false;}
+});
+window.addEventListener("pointerup",()=>{S.drilling=false;});
+cv.addEventListener("pointermove",e=>{
+  if(S.mode!=="play")return;
+  const r=cv.getBoundingClientRect();
+  const tx=(e.clientX-r.left), ty=(e.clientY-r.top);
+  if(S.drilling){
+    S.vx+=(tx-S.x)*0.004;
+    S.vy+=(ty-S.y)*0.004;
+  }
+});
+
+/* ============ game flow ============ */
+function startGame(){
+  genWorld();
+  S.x=W/2; S.y=0; S.vx=0; S.vy=0;
+  S.fuel=tankMax(); S.ore={iron:0,copper:0,gold:0,meteor:0};
+  S.particles=[]; S.shake=0; S.drilling=false; S.surfacing=false;
+  S.mode="play";
+  $("overlay").style.display="none";
+  $("hint").style.opacity="1";
+  setTimeout(()=>{$("hint").style.opacity="0";},4000);
+}
+function startSurface(){
+  S.mode="surface";
+  S.drilling=false;
+  const d=depthMeters();
+  if(d>S.record){S.record=d; toast("🏆 New record: "+d+"m!");}
+  save();
+  showSurface();
+}
+function showSurface(){
+  const ov=$("overlay");
+  const d=depthMeters();
+  const val=oreValue();
+  const canDrill=S.coins>=drillCost(), canTank=S.coins>=tankCost();
+  ov.style.display="flex";
+  ov.innerHTML=`
+  <div class="card">
+    <h1>⛏ Surface Camp</h1>
+    <p>You reached <b style="color:var(--accent)">${d}m</b> · record <b style="color:var(--blue)">${S.record}m</b></p>
+    <div class="big">Ore hauled:
+      ${S.ore.iron?`<span style="color:${ORE_COLOR.iron}">Iron ×${S.ore.iron}</span> `:""}
+      ${S.ore.copper?`<span style="color:${ORE_COLOR.copper}">Copper ×${S.ore.copper}</span> `:""}
+      ${S.ore.gold?`<span style="color:${ORE_COLOR.gold}">Gold ×${S.ore.gold}</span> `:""}
+      ${S.ore.meteor?`<span style="color:${ORE_COLOR.meteor}">Meteorium ×${S.ore.meteor}</span> `:""}
+      ${totalOre()===0?"<span style='color:var(--dim)'>— nothing</span>":""}
+    </div>
+    <div class="upgrades">
+      <div class="upg">
+        <div class="info">⚙ Drill Power <span class="lv">Lv ${S.drillLv}</span>
+          <small>Faster digging, breaks harder rock</small></div>
+        <button id="buyDrill" ${canDrill?"":"disabled"}>💰 ${drillCost()}</button>
+      </div>
+      <div class="upg">
+        <div class="info">⛽ Fuel Tank <span class="lv">Lv ${S.tankLv}</span>
+          <small>Max ${tankMax()} fuel</small></div>
+        <button id="buyTank" ${canTank?"":"disabled"}>💰 ${tankCost()}</button>
+      </div>
+    </div>
+    <button class="btn" id="sellBtn">Sell Ore — 💰 ${val}</button>
+    <button class="btn ghost" id="diveBtn">Dive Again ↓</button>
+  </div>`;
+  $("sellBtn").onclick=collectOre;
+  $("diveBtn").onclick=startGame;
+  $("buyDrill").onclick=()=>{
+    if(S.coins>=drillCost()){S.coins-=drillCost();S.drillLv++;save();showSurface();toast("Drill upgraded!");}
+  };
+  $("buyTank").onclick=()=>{
+    if(S.coins>=tankCost()){S.coins-=tankCost();S.tankLv++;save();showSurface();toast("Tank upgraded!");}
+  };
+}
+function collectOre(){
+  const val=oreValue();
+  S.coins+=val;
+  S.ore={iron:0,copper:0,gold:0,meteor:0};
+  save();
+  if(val>0) toast("💰 Sold for "+val+" coins!");
+  showSurface();
+}
+function gameOver(){
+  S.mode="gameover";
+  const d=depthMeters();
+  if(d>S.record){S.record=d;}
+  save();
+  const ov=$("overlay");
+  ov.style.display="flex";
+  ov.innerHTML=`
+  <div class="card">
+    <h1>💀 Out of Fuel</h1>
+    <p>Your drill sputtered and died at <b style="color:var(--accent)">${d}m</b>.</p>
+    <div class="big">Ore lost: ${totalOre()} · Record: ${S.record}m</div>
+    <button class="btn" id="retry">Try Again</button>
+    <button class="btn ghost" id="menu">Main Menu</button>
+  </div>`;
+  $("retry").onclick=startGame;
+  $("menu").onclick=showMenu;
+}
+function showMenu(){
+  S.mode="menu";
+  const ov=$("overlay");
+  ov.style.display="flex";
+  ov.innerHTML=`
+  <div class="card">
+    <h1>⛏ <em>Meteor</em> Miner</h1>
+    <p>Drill deep through pixel earth. Collect ore, manage your fuel,
+       and sell at the surface to upgrade your rig.
+       How deep can you go?</p>
+    <div class="big">Record: <b style="color:var(--blue)">${S.record}m</b> ·
+       Coins: <b style="color:var(--accent)">${S.coins}</b></div>
+    <button class="btn" id="start">Start Mining</button>
+  </div>`;
+  $("start").onclick=startGame;
+}
+
+/* ============ physics & drilling ============ */
+function tileAt(px,py){
+  const c=Math.floor(px/TILE), r=Math.floor(py/TILE);
+  if(c<0||c>=S.cols||r<0||r>=S.rows) return null;
+  return S.grid[r*S.cols+c];
+}
+function step(dt){
+  S.time+=dt;
+  updateParticles();
+  if(S.shake>0) S.shake=Math.max(0,S.shake-dt*8);
+  if(S.mode!=="play") return;
+
+  const d=depthMeters();
+  const layer=LAYER_AT(d);
+
+  /* steering */
+  if(keys["a"]||keys["arrowleft"]) S.vx-=STEER;
+  if(keys["d"]||keys["arrowright"]) S.vx+=STEER;
+  if(keys["w"]||keys["arrowup"]) S.vy-=STEER*0.7;
+  if(keys["s"]||keys["arrowdown"]) S.vy+=STEER*0.7;
+  S.vx*=0.92; S.vy*=0.92;
+  S.vx=Math.max(-MAXVX,Math.min(MAXVX,S.vx));
+  S.vy=Math.max(-MAXVY,Math.min(MAXVY,S.vy));
+
+  /* fuel */
+  if(S.drilling){
+    S.fuel-=FUEL_COST*dt*60/60;
+    if(S.fuel<=0){S.fuel=0;gameOver();return;}
+  } else {
+    S.fuel=Math.min(tankMax(),S.fuel+REGEN*dt);
+  }
+
+  /* move */
+  S.x+=S.vx; S.y+=S.vy;
+  S.x=Math.max(TILE,Math.min(W-TILE,S.x));
+  S.y=Math.max(0,Math.min(H-TILE,S.y));
+
+  /* drill: break tiles in a small radius ahead of motion */
+  if(S.drilling){
+    const pw=drillPower();
+    const radius=8+pw*4;
+    const cx=Math.floor(S.x/TILE), cy=Math.floor(S.y/TILE);
+    for(let dr=-1;dr<=1;dr++){
+      for(let dc=-1;dc<=1;dc++){
+        const c=cx+dc, r=cy+dr;
+        if(c<0||c>=S.cols||r<0||r>=S.rows) continue;
+        const t=S.grid[r*S.cols+c];
+        if(t.broken) continue;
+        const tx=c*TILE+TILE/2, ty=r*TILE+TILE/2;
+        const dist=Math.hypot(tx-S.x,ty-S.y);
+        if(dist>radius+TILE/2) continue;
+        /* hardness by layer */
+        const hardness=[1,1.2,1.6,2.2,3][layer];
+        if(Math.random()<pw/hardness*0.55){
+          t.broken=true;
+          S.shake=Math.min(6,S.shake+1.5);
+          if(t.ore){
+            S.ore[t.ore]++;
+            spawnSpark(tx,ty,ORE_COLOR[t.ore]);
+            if(t.ore==="meteor") toast("☄ Meteorium found!");
+          } else {
+            spawnDust(tx,ty,layer<2?"#6b5540":"#555e6e",4);
+          }
+        }
+      }
+    }
+  }
+
+  updateHUD();
+}
+
+/* ============ rendering ============ */
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const shx=(Math.random()-.5)*S.shake, shy=(Math.random()-.5)*S.shake;
+  ctx.save();
+  ctx.translate(shx,shy);
+
+  const d=depthMeters();
+  const layer=LAYER_AT(d);
+
+  /* background gradient by depth */
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  const topC=["#1a2233","#1c2430","#181e28","#14181f","#1a1515"][layer];
+  const botC=["#0f1520","#10161e","#0d1218","#0a0e13","#120d0d"][layer];
+  grad.addColorStop(0,topC); grad.addColorStop(1,botC);
+  ctx.fillStyle=grad; ctx.fillRect(-10,-10,W+20,H+20);
+
+  /* stars at shallow depth */
+  if(d<4){
+    ctx.fillStyle="rgba(255,255,255,0.5)";
+    for(let i=0;i<20;i++){
+      const sx=(i*137.5)%W, sy=(i*89.3)%(H*0.3);
+      const tw=0.3+0.7*Math.abs(Math.sin(S.time*2+i));
+      ctx.globalAlpha=tw*0.6;
+      ctx.fillRect(sx,sy,1.5,1.5);
+    }
+    ctx.globalAlpha=1;
+  }
+
+  /* tiles */
+  const c0=Math.max(0,Math.floor((S.x-W/2)/TILE)-1);
+  const c1=Math.min(S.cols-1,Math.ceil((S.x+W/2)/TILE)+1);
+  const r0=Math.max(0,Math.floor((S.y-H/2)/TILE)-1);
+  const r1=Math.min(S.rows-1,Math.ceil((S.y+H/2)/TILE)+1);
+  for(let r=r0;r<=r1;r++){
+    for(let c=c0;c<=c1;c++){
+      const t=S.grid[r*S.cols+c];
+      if(t.broken) continue;
+      const x=c*TILE, y=r*TILE;
+      const ll=LAYER_AT(r);
+      ctx.fillStyle=LAYER[ll].color;
+      ctx.fillRect(x,y,TILE,TILE);
+      if(t.shade){
+        ctx.fillStyle=LAYER[ll].deep;
+        ctx.fillRect(x,y,TILE,TILE);
+      }
+      /* speckle */
+      if(t.speck<0.3){
+        ctx.fillStyle="rgba(255,255,255,0.04)";
+        ctx.fillRect(x+t.speck*14,y+(1-t.speck)*14,3,3);
+      }
+      /* ore */
+      if(t.ore){
+        const oc=ORE_COLOR[t.ore];
+        ctx.fillStyle=oc;
+        const s=t.ore==="meteor"?7:5;
+        ctx.fillRect(x+TILE/2-s/2,y+TILE/2-s/2,s,s);
+        ctx.fillStyle="rgba(255,255,255,0.35)";
+        ctx.fillRect(x+TILE/2-s/2,y+TILE/2-s/2,s/2,s/2);
+        if(t.ore==="meteor"){
+          ctx.strokeStyle=oc; ctx.lineWidth=1;
+          ctx.globalAlpha=0.3+0.3*Math.sin(S.time*4);
+          ctx.strokeRect(x+TILE/2-s/2-2,y+TILE/2-s/2-2,s+4,s+4);
+          ctx.globalAlpha=1;
+        }
+      }
+      /* grid line */
+      ctx.strokeStyle="rgba(0,0,0,0.15)";
+      ctx.strokeRect(x+0.5,y+0.5,TILE-1,TILE-1);
+    }
+  }
+
+  /* particles */
+  for(const p of S.particles){
+    ctx.globalAlpha=p.life;
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size);
+  }
+  ctx.globalAlpha=1;
+
+  /* player drill */
+  if(S.mode==="play"||S.mode==="surface"){
+    const px=S.x, py=S.y;
+    /* glow */
+    const glow=ctx.createRadialGradient(px,py,2,px,py,22);
+    glow.addColorStop(0,"rgba(255,180,84,0.35)");
+    glow.addColorStop(1,"rgba(255,180,84,0)");
+    ctx.fillStyle=glow;
+    ctx.fillRect(px-22,py-22,44,44);
+    /* body */
+    ctx.fillStyle="#c9d1d9";
+    ctx.fillRect(px-6,py-8,12,16);
+    ctx.fillStyle="#8b949e";
+    ctx.fillRect(px-6,py-8,12,4);
+    /* drill tip */
+    ctx.fillStyle="#ffb454";
+    ctx.beginPath();
+    ctx.moveTo(px-5,py+8); ctx.lineTo(px+5,py+8); ctx.lineTo(px,py+14);
+    ctx.closePath(); ctx.fill();
+    /* thruster flame when drilling */
+    if(S.drilling){
+      ctx.fillStyle="rgba(255,140,40,"+(0.5+0.3*Math.sin(S.time*20))+")";
+      ctx.beginPath();
+      ctx.moveTo(px-4,py-8); ctx.lineTo(px+4,py-8);
+      ctx.lineTo(px+(Math.random()-.5)*4,py-16-Math.random()*6);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  /* depth markers */
+  ctx.fillStyle="rgba(255,255,255,0.12)";
+  ctx.font="10px monospace";
+  for(let m=5;m<Math.max(30,d+10);m+=5){
+    const my=m*TILE;
+    if(my>0&&my<H){
+      ctx.fillRect(0,my,W,1);
+      ctx.fillText(m+"m",6,my-3);
+    }
+  }
+
+  ctx.restore();
+
+  /* fuel bar (bottom) */
+  if(S.mode==="play"){
+    const bw=Math.min(200,W*0.5), bx=(W-bw)/2, by=H-18;
+    ctx.fillStyle="rgba(0,0,0,0.5)";
+    ctx.fillRect(bx-2,by-2,bw+4,10);
+    const frac=S.fuel/tankMax();
+    ctx.fillStyle=frac>0.25?"#3fb950":"#f85149";
+    ctx.fillRect(bx,by,bw*frac,6);
+    ctx.strokeStyle="rgba(255,255,255,0.2)";
+    ctx.strokeRect(bx-2,by-2,bw+4,10);
+  }
+}
+
+/* ============ loop ============ */
+let last=0;
+function loop(ts){
+  const dt=Math.min(0.05,(ts-last)/1000||0.016);
+  last=ts;
+  step(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+/* ============ init ============ */
+resize();
+showMenu();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
