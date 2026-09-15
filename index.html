@@ -51,6 +51,12 @@
     padding:7px 12px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap}
   .upg button:disabled{background:var(--line);color:var(--dim);cursor:not-allowed}
   .upg button:active:not(:disabled){transform:scale(.95)}
+  .btn.big{padding:15px 44px;font-size:18px;border-radius:10px}
+  .keys{font-size:12px;color:var(--dim);margin-top:12px;line-height:1.6}
+  .keys b{color:var(--text);background:var(--panel2);border:1px solid var(--line);
+    border-radius:4px;padding:1px 6px;font-family:monospace}
+  .newbest{display:inline-block;background:var(--green);color:#04140a;font-weight:800;
+    border-radius:6px;padding:3px 10px;font-size:12px;margin-bottom:12px;letter-spacing:.5px}
   footer{padding:7px 12px;background:var(--panel);border-top:1px solid var(--line);
     text-align:center;font-size:11.5px;color:var(--dim);z-index:5}
   footer a{color:var(--blue);text-decoration:none}
@@ -116,6 +122,7 @@ const S={
   grid:null, cols:0, rows:0,
   particles:[], shake:0, time:0,
   drilling:false, surfacing:false,
+  paused:false,
   toastTimer:0
 };
 try{
@@ -224,13 +231,72 @@ function updateParticles(){
   }
 }
 
+/* ============ audio (WebAudio, no files) ============ */
+let AC=null;
+function audio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}}
+  if(AC&&AC.state==="suspended")AC.resume();
+  return AC;
+}
+function tone(freq,dur,type,vol,slide){
+  const ac=audio(); if(!ac)return;
+  const o=ac.createOscillator(), g=ac.createGain();
+  o.type=type||"square"; o.frequency.value=freq;
+  if(slide)o.frequency.exponentialRampToValueAtTime(slide,ac.currentTime+dur);
+  g.gain.value=vol||0.08;
+  g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+dur);
+  o.connect(g); g.connect(ac.destination);
+  o.start(); o.stop(ac.currentTime+dur);
+}
+let lastOreSfx=0;
+function sfx(kind){
+  try{
+    if(kind==="ore"){
+      const now=performance.now();
+      if(now-lastOreSfx<120)return;
+      lastOreSfx=now;
+      tone(520+Math.random()*160,0.09,"square",0.06,900);
+    }else if(kind==="gameover"){
+      tone(220,0.5,"sawtooth",0.09,55);
+    }else if(kind==="start"){
+      tone(330,0.12,"square",0.07,660);
+    }else if(kind==="sell"){
+      tone(440,0.1,"square",0.07,880);
+      setTimeout(()=>tone(660,0.12,"square",0.07,990),90);
+    }
+  }catch(e){}
+}
+
 /* ============ input ============ */
 const keys={};
+function togglePause(){
+  if(S.mode!=="play")return;
+  S.paused=!S.paused;
+  S.drilling=false;
+  const ov=$("overlay");
+  if(S.paused){
+    ov.style.display="flex";
+    ov.innerHTML=`<div class="card">
+      <h1>⏸ Paused</h1>
+      <p>Take a breather. Your drill is holding position at <b style="color:var(--accent)">${depthMeters()}m</b>.</p>
+      <button class="btn big" id="resume">Resume</button>
+      <button class="btn ghost" id="quitMenu">Main Menu</button>
+    </div>`;
+    $("resume").onclick=togglePause;
+    $("quitMenu").onclick=showMenu;
+  }else{
+    ov.style.display="none";
+  }
+}
 window.addEventListener("keydown",e=>{
   keys[e.key.toLowerCase()]=true;
+  if(e.key==="Escape"||e.key==="p"||e.key==="P"){
+    if(S.mode==="play")togglePause();
+    return;
+  }
   if(e.key===" "||e.key==="t"||e.key==="T"){
     e.preventDefault();
-    if(S.mode==="play") startSurface();
+    if(S.mode==="play"&&!S.paused) startSurface();
     else if(S.mode==="menu") startGame();
     else if(S.mode==="gameover") startGame();
   }
@@ -239,11 +305,12 @@ window.addEventListener("keydown",e=>{
 window.addEventListener("keyup",e=>{keys[e.key.toLowerCase()]=false;});
 cv.addEventListener("pointerdown",e=>{
   e.preventDefault();
-  if(S.mode==="play"){S.drilling=true;S.surfacing=false;}
+  audio();
+  if(S.mode==="play"&&!S.paused){S.drilling=true;S.surfacing=false;}
 });
 window.addEventListener("pointerup",()=>{S.drilling=false;});
 cv.addEventListener("pointermove",e=>{
-  if(S.mode!=="play")return;
+  if(S.mode!=="play"||S.paused)return;
   const r=cv.getBoundingClientRect();
   const tx=(e.clientX-r.left), ty=(e.clientY-r.top);
   if(S.drilling){
@@ -251,14 +318,21 @@ cv.addEventListener("pointermove",e=>{
     S.vy+=(ty-S.y)*0.004;
   }
 });
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden&&S.mode==="play"&&!S.paused)togglePause();
+});
 
 /* ============ game flow ============ */
 function startGame(){
+  audio();
+  sfx("start");
+  S.paused=false;
   genWorld();
   S.x=W/2; S.y=0; S.vx=0; S.vy=0;
   S.fuel=tankMax(); S.ore={iron:0,copper:0,gold:0,meteor:0};
   S.particles=[]; S.shake=0; S.drilling=false; S.surfacing=false;
   S.mode="play";
+  S.paused=false;
   $("overlay").style.display="none";
   $("hint").style.opacity="1";
   setTimeout(()=>{$("hint").style.opacity="0";},4000);
@@ -314,6 +388,7 @@ function showSurface(){
 }
 function collectOre(){
   const val=oreValue();
+  if(val>0)sfx("sell");
   S.coins+=val;
   S.ore={iron:0,copper:0,gold:0,meteor:0};
   save();
@@ -323,16 +398,19 @@ function collectOre(){
 function gameOver(){
   S.mode="gameover";
   const d=depthMeters();
-  if(d>S.record){S.record=d;}
+  const newBest=d>S.record;
+  if(newBest){S.record=d;}
   save();
+  sfx("gameover");
   const ov=$("overlay");
   ov.style.display="flex";
   ov.innerHTML=`
   <div class="card">
+    ${newBest?'<div class="newbest">★ NEW BEST ★</div>':""}
     <h1>💀 Out of Fuel</h1>
     <p>Your drill sputtered and died at <b style="color:var(--accent)">${d}m</b>.</p>
-    <div class="big">Ore lost: ${totalOre()} · Record: ${S.record}m</div>
-    <button class="btn" id="retry">Try Again</button>
+    <div class="big">Score: <b style="color:var(--accent)">${d}m</b> · Best: <b style="color:var(--blue)">${S.record}m</b></div>
+    <button class="btn big" id="retry">Play Again</button>
     <button class="btn ghost" id="menu">Main Menu</button>
   </div>`;
   $("retry").onclick=startGame;
@@ -340,6 +418,7 @@ function gameOver(){
 }
 function showMenu(){
   S.mode="menu";
+  S.paused=false;
   const ov=$("overlay");
   ov.style.display="flex";
   ov.innerHTML=`
@@ -350,7 +429,9 @@ function showMenu(){
        How deep can you go?</p>
     <div class="big">Record: <b style="color:var(--blue)">${S.record}m</b> ·
        Coins: <b style="color:var(--accent)">${S.coins}</b></div>
-    <button class="btn" id="start">Start Mining</button>
+    <button class="btn big" id="start">▶ Play</button>
+    <div class="keys">Hold <b>Space</b>/<b>T</b> to drill · <b>W</b><b>A</b><b>S</b><b>D</b> to steer ·
+      <b>Esc</b> pause · on touch: hold to drill, drag to steer</div>
   </div>`;
   $("start").onclick=startGame;
 }
@@ -366,6 +447,7 @@ function step(dt){
   updateParticles();
   if(S.shake>0) S.shake=Math.max(0,S.shake-dt*8);
   if(S.mode!=="play") return;
+  if(S.paused) return;
 
   const d=depthMeters();
   const layer=LAYER_AT(d);
@@ -413,6 +495,7 @@ function step(dt){
           S.shake=Math.min(6,S.shake+1.5);
           if(t.ore){
             S.ore[t.ore]++;
+            sfx("ore");
             spawnSpark(tx,ty,ORE_COLOR[t.ore]);
             if(t.ore==="meteor") toast("☄ Meteorium found!");
           } else {
